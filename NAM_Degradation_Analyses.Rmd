@@ -589,7 +589,6 @@ perm <- how(nperm = 999)
 setBlocks(perm) <- with(dfC7d4, Fecal.ID)
 
 adonis2(unweigh_C7d4 ~ SampleDay, data = dfC7d4, permutations = perm)
-# NOT significant: p = 0.18, R2 = 0.05639, F = 0.4034, df = 4
 
 ```
 
