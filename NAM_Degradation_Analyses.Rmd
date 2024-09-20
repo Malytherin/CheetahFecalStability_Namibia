@@ -594,22 +594,21 @@ adonis2(unweigh_C7d4 ~ SampleDay, data = dfC7d4, permutations = perm)
 dfC7d4$SampleDay <- as.factor(dfC7d4$SampleDay)
 groups <- dfC7d4[["SampleDay"]]
 class(groups)
-levels(groups) #
-# this is betadisper(distance matric, variable)
+levels(groups) 
 C7d4_disp <- betadisper(unweigh_C7d4, groups, type = "centroid")
 anova(C7d4_disp) # non significant dispersion (p=0.7535), different days have similar dispersion
 plot(C7d4_disp, cex = 0)
 boxplot(C7d4_disp)
 ```
 
-# Make Beta Diversity Figure - Jaccard and BC Plots
+### Make Beta Diversity Figure - Jaccard and BC Plots
 ```{r}
 library(patchwork)
 C7d4Bray1 + C7d4jac1 + plot_layout()
 
 ```
 
-# C7d4 FIGURE 1
+### C7d4 FIGURE 1
 ```{r}
 layoutC7d4Fig1 <- "
 AAAAAAAA
@@ -634,7 +633,7 @@ C7d4_P.RA + C7d4pd + C7d4Bray1 + plot_layout(design = layoutC7d4Fig1)
 
 ```
 
-Supplemental Figure 1       
+### Supplemental Figure 1       
 ```{r}
 layoutC7d4Fig_S1 <- "
 AAAAAAAAAA
