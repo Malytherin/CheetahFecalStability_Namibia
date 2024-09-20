@@ -14,6 +14,7 @@ library(ShortRead)
 library(phyloseq)
 library(ggplot2)
 library(lme4)
+library(ape)
 library(car)
 library(pairwiseAdonis)
 library(vegan)
@@ -39,14 +40,14 @@ col6 <- c("#ffa600", "#3aba4d","#dd5182","#955196","#0f7ed9","#003f5c")
 ### Load phyloseq object C8
 ```{r, echo=FALSE}
 # read in feature table
-C8_feature_tab <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_featuretable_July2024.csv", header = T, row.names = 1)
+C8_feature_tab <- read.csv("CCF8_featuretable_July2024.csv", header = T, row.names = 1)
 
 # Make compatible for phyloseq format
 C8_asv_tab = otu_table(C8_feature_tab, taxa_are_rows = TRUE)
 dim(C8_asv_tab)
 
 # Read in meta data file:
-C8_meta_data <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_Meta_July2024.csv", header = T, row.names = 1)
+C8_meta_data <- read.csv("CCF8_Meta_July2024.csv", header = T, row.names = 1)
 
 # check class for sample_data (dataframe os expected)
 class(C8_meta_data)
@@ -58,7 +59,7 @@ C8_meta_data$quant.reading <- as.numeric(C8_meta_data$quant.reading)
 C8mf <- sample_data(C8_meta_data)
 
 # Read in taxonomy file
-C8_taxonomy <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_taxonomy_July2024.csv", row.names = 1)
+C8_taxonomy <- read.csv("CCF8_taxonomy_July2024.csv", row.names = 1)
 
 # Taxonomy needs to be a matrix
 C8_taxonomy <- as.matrix(C8_taxonomy)
@@ -67,10 +68,10 @@ C8_taxonomy <- as.matrix(C8_taxonomy)
 C8_taxonomy_final = tax_table(C8_taxonomy)
 
 ###Write in DNA sequences
-C8_DNAseqs <- readDNAStringSet("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_DNAsequences.fasta")
+C8_DNAseqs <- readDNAStringSet("CCFPT_2024_DNAsequences.fasta")
 
 ##read in tree ### 
-C8_tree = read.tree("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_exported_tree/CCFPT_2024_tree.nwk")
+C8_tree = read.tree("CCFPT_2024_tree.nwk")
 
 ###Merge it all together: Make a phyloseq object - psPTD = ps PoopTime Decontam object! 
 C8 <- merge_phyloseq(C8mf, C8_asv_tab, C8_taxonomy_final, C8_DNAseqs, C8_tree)
