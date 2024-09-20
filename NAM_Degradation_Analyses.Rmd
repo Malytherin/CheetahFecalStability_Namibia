@@ -481,7 +481,6 @@ perm <- how(nperm = 999)
 setBlocks(perm) <- with(dfC7d4, Fecal.ID) 
 
 adonis2(bray_C7d4 ~ SampleDay, data = dfC7d4, permutations = perm)
-# significant: p = 0.009, R2 = 0.12752, F = 0.9866, df = 4
 
 # Pairwise PERMANOVA - Limits permutations to within Fecal.ID
 pairwise.adonis2(bray_C7d4 ~ SampleDay, data = dfC7d4, strata = 'Fecal.ID')
@@ -506,14 +505,13 @@ p.adjust(BC_ALLpvals, method = "fdr") # none are significant
 
 #### BC Check dispersion between Sample Days
 ```{r}
-
 # Check dispersion between sample days
 ## SuperOrder ##
 dfC7d4$SampleDay <- as.factor(dfC7d4$SampleDay)
 groups <- dfC7d4[["SampleDay"]]
 class(groups)
-levels(groups) #
-# this is betadisper(distance matric, variable)
+levels(groups) 
+
 C7d4_disp <- betadisper(bray_C7d4, groups, type = "centroid")
 anova(C7d4_disp) # non significant dispersion (p=0.5443), different days have similar dispersion
 plot(C7d4_disp, cex = 0)
@@ -545,7 +543,7 @@ perm <- how(nperm = 999)
 setBlocks(perm) <- with(dfC7d4, Fecal.ID)
 
 adonis2(jac_C7d4 ~ SampleDay, data = dfC7d4, permutations = perm)
-# Significant: p = 0.059, R2 = 0.07709, F = 0.5638, df = 4
+# Output: p = 0.059, R2 = 0.07709, F = 0.5638, df = 4
 ```
 
 #### Jaccard Check dispersion between sample days
