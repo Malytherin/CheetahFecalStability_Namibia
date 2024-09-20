@@ -537,7 +537,6 @@ C7d4jac1 <- C7d4_jac +
 C7d4jac1 
 
 #Calculate PERMANOVA
-
 # Note strata is deprecated: define blocks in 'permutations'
 perm <- how(nperm = 999)
 setBlocks(perm) <- with(dfC7d4, Fecal.ID)
@@ -546,16 +545,14 @@ adonis2(jac_C7d4 ~ SampleDay, data = dfC7d4, permutations = perm)
 ```
 
 #### Jaccard Check dispersion between sample days
-
 ```{r}
 # Check dispersion between sample days
 
-## SuperOrder ##
+## SuperOrder
 dfC7d4$SampleDay <- as.factor(dfC7d4$SampleDay)
 groups <- dfC7d4[["SampleDay"]]
 class(groups)
-levels(groups) #
-# this is betadisper(distance matric, variable)
+levels(groups) 
 C7d4_disp <- betadisper(jac_C7d4, groups, type = "centroid")
 anova(C7d4_disp) # non significant dispersion (p=0.2571), different days have similar dispersion
 plot(C7d4_disp, cex = 0)
@@ -581,10 +578,8 @@ C7d4unw1 <- C7d4_unw +
 C7d4unw1
 
 #Calculate PERMANOVA
-library(pairwiseAdonis)
+
 # Note strata is deprecated: define blocks in 'permutations'
-
-
 perm <- how(nperm = 999)
 setBlocks(perm) <- with(dfC7d4, Fecal.ID)
 
