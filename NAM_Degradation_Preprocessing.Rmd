@@ -1,0 +1,625 @@
+---
+title: "CCF.PT_Preprocessing_2024"
+author: "M. Maly"
+date: "2024-07-23"
+output: html_document
+---
+
+
+#### Load libraries
+```{r}
+library(dada2)
+library(stats)
+library(Biostrings)
+library(ShortRead)
+```
+
+### Read in demultiplexed FASTQ files
+```{r}
+##defining a path variable so that it points to the extracted directory on computer
+path <- "/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/unfiltered_fastq"
+
+list.files(path)
+
+# Check and make sure nobody is missing
+length(list.files(path)) # should be 2 x the number of samples (unless additional folders present if already run through this once)
+
+```
+
+### Read in the names of the fastq files
+```{r}
+# Forward and reverse fastq filenames have format: SAMPLENAME_R1_001.fastq and SAMPLENAME_R2_001.fastq
+fnFs <- sort(list.files(path, pattern="_R1_001.fastq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_R2_001.fastq", full.names = TRUE))
+
+# Again make sure all samples are accounted for
+length(fnFs)
+length(fnRs)
+
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+sample.names
+
+```
+
+#### INSPECTION OF QUALITY PROFILES
+```{r}
+plotQualityProfile(fnFs[1:4])
+
+plotQualityProfile(fnRs[1:4])
+```
+
+#### FILTERING AND TRIMMING 
+```{r}
+##want sequence quality to be 30 and above for truncLen function
+
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+```
+
+### Filter
+```{r}
+
+out1 <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(270,200),
+                      maxN=0, maxEE=c(2,2), trimLeft = 19, trimRight = 23, 
+                      truncQ=2, rm.phix=TRUE,
+                      compress=TRUE, multithread=TRUE)
+
+head(out1)
+out1
+```
+
+##### Learn Error Rates
+```{r}
+errF <- learnErrors(filtFs, multithread = TRUE)
+errR <- learnErrors(filtRs, multithread = TRUE)
+
+# Plot errors
+plotErrors(errF, nominalQ = TRUE)
+
+```
+
+#### Dereplicate amplicon sequences from FASTQ files
+```{r}
+derepFs <- derepFastq(filtFs, verbose = TRUE)
+derepRs <- derepFastq(filtRs, verbose = TRUE)
+
+# Name the derep-class objects by the sample names:
+names(derepFs) <- sample.names
+names(derepRs) <- sample.names
+
+```
+
+#### Sample Inference:
+```{r}
+# Sample Inference:
+dadaFs <- dada(derepFs, err = errF, multithread = TRUE)
+dadaRs <- dada(derepRs, err = errR, multithread = TRUE)
+
+dadaFs[[1]]
+
+```
+
+#### Merge each denoised pair of F and R reads:
+```{r}
+# Merge each denoised pair of F and R reads:
+mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose = TRUE)
+
+```
+
+#### Make sequence table
+```{r}
+## Make a sequence table - construct a sample-by-sequence observation matrix:
+seqtab <- makeSequenceTable(mergers)
+
+##get an idea about the distribution of the amplicon size in bp
+table(nchar(getSequences(seqtab)))
+
+# Remove chimeras
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+
+dim(seqtab.nochim) #53 and 1660
+
+# Get proportion of sequences left:
+sum(seqtab.nochim)/sum(seqtab) #.9071958 (About 10% were chimeras)
+
+
+saveRDS(seqtab.nochim, "CCFPT_7.23.24_seqtab.rds")
+```
+
+##### Build table to track reads through the pipeline
+```{r}
+# Track reads through the pipeline
+# Look at number of reads that made it through each step in th pipeline:
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out1, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(seqtab.nochim))
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+head(track)
+track
+```
+
+### Assign Taxonomy
+```{r}
+##assign taxonomy
+taxa <- assignTaxonomy(seqtab.nochim, "/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/rdp_train_set_16.fa", multithread=TRUE)
+taxa <- addSpecies(taxa, "/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/rdp_species_assignment_16.fa")
+
+##inspect the taxonomic assignments:
+taxa.print <- taxa # Removing sequence rownames for display only
+rownames(taxa.print) <- NULL
+head(taxa.print)
+
+```
+
+### Pass off to phyloseq
+```{r phyloseq}
+library(phyloseq)
+
+##combine feature table and taxonomy table in same order
+ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=FALSE), 
+               tax_table(taxa))
+ps #1770 taxa and 53 samples (7 taxonomic ranks)
+   
+
+## rename ASVs to numbers
+new.names <- paste0("ASV", seq(ntaxa(ps))) 
+
+# Define new names ASV1, ASV2, ...
+seqs <- taxa_names(ps) # Store sequences
+names(seqs) <- new.names # Make map from ASV1 to full sequence
+taxa_names(ps) <- new.names # Rename to human-friendly format
+
+
+# Load seqRFLP package
+BiocManager::install("seqRFLP")
+library(seqRFLP)
+
+##convert feature table to matrix
+site_species <-as(otu_table(ps), "matrix")
+
+##need to change this to match mapping file later
+rownames(site_species)
+
+##transpose to make a species by site matrix
+species_site <- t(site_species)
+
+##taxon table 
+tax <- as(tax_table(ps), "matrix")
+head(seqs)
+
+# Identify the directory to write all your files to for analysis
+getwd()
+setwd("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/COMBINED_PoopTrials/CPTf_2023_fresh_data/")
+
+# Write out files: feature table, taxonomy, and DNA sequences
+write.csv(species_site, "/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_feature_table.csv")
+write.csv(tax, "/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_taxonomy.csv")
+write.csv(seqs, '/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_DNAsequences.csv')
+
+### convert DNA sequences .csv to a Fasta file
+seq_data <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_DNAsequences.csv", header = T)
+seq_data <- dataframe2fas(seq_data, file = "/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_DNAsequences.fasta")
+```
+
+############################################################
+##########SWITCH INTO QIIME 2 using BASH TO CREATE PHYLOGENETIC TREE
+```{bash}
+conda activate qiime2-2023.7
+
+cd OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024
+
+qiime tools import \
+--input-path CCFPT_2024_DNAsequences.fasta \
+--output-path CCFPT_2024_DNAsequences.qza \
+--type 'FeatureData[Sequence]'
+
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+--i-sequences CCFPT_2024_DNAsequences.qza \
+--o-alignment CCFPT_2024_aligned_rep_seqs.qza \
+--o-masked-alignment CCFPT_2024_masked_aligned_rep_seqs.qza \
+--o-tree CCFPT_2024_unrooted_tree.qza \
+--o-rooted-tree CCFPT_2024_rooted_tree.qza
+
+
+## Need to rename tree to informative name after output
+qiime tools export \
+--input-path CCFPT_2024_rooted_tree.qza \
+--output-path CCFPT_2024_exported_tree
+```
+
+#########################SWITCH BACK INTO R############################
+#### Bring in tree, metadata, feature table, taxonomy assign, and DNA seq to the phyloseq object 
+
+## Create phyloseq object
+#### load libraries
+```{r load libraries}
+library(lattice)
+library(permute)
+library(phyloseq)
+library(ape)
+library(vegan)
+library(ggplot2)
+library(dada2)
+library(Rcpp)
+library(BiocGenerics)
+library(parallel)
+library(S4Vectors)
+library(IRanges)
+library(XVector)
+library(Biostrings)
+```
+
+## Read in feature table, metadata, taxonomy, and DNA sequences to build phyloseq object
+```{r create ps object}
+feature_tab <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_feature_table.csv", header = T, row.names = 1)
+#Make compatible for phyloseq format
+asv_tab = otu_table(feature_tab, taxa_are_rows = TRUE)
+dim(asv_tab) #770 and 53
+View(feature_tab)
+#read in meta data file:
+meta_data1 <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPt_May2024_metadata.csv", header = T, row.names = 1)
+View(meta_data1)
+
+# dataframe is expected for sample_data
+class(meta_data1)
+##change quant_reading column to numeric
+meta_data1$quant.reading <- as.numeric(meta_data1$quant.reading)
+meta_data2$quant.reading == 0 # the last value will need to be changed to 0.1 for decontam
+meta_data2 <- meta_data1
+meta_data2$quant.reading[meta_data2$quant.reading == 0] <- 0.1
+
+# make compatible for phyloseq
+mf <- sample_data(meta_data2)
+View(mf)
+
+#read in taxonomy file
+taxonomy <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_taxonomy.csv", row.names=1)
+# Needs to be a matrix
+taxonomy <- as.matrix(taxonomy)
+# Make compatible for phyloseq
+taxonomy_final = tax_table(taxonomy)
+
+# read in DNA sequences
+DNAseqs <- readDNAStringSet("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_DNAsequences.fasta")
+head(DNAseqs)
+
+# read in phylogenetic tree (rooted tree)
+tree = read_tree("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_exported_tree/CCFPT_2024_tree.nwk")
+
+#Merge it all together to make Diet phyloseq object (ps_diet)
+# DO NOT ADD TREE YET (add it AFTER decontam otherwise they won't remerge)
+ps_ccf2024.7 <- merge_phyloseq(mf, asv_tab, taxonomy_final, DNAseqs, tree)
+
+ps_ccf2024.7 #1770 taxa and 53 samples
+sample_names(ps_ccf2024.7)
+
+```
+
+```{r rarefaction plot option 2}
+library(ranacapa)
+
+pscptf2023.rarefaction <- ggrare(ps_ccf2024.7, step = 200, color = "SampleDay", se = FALSE)
+
+ps_diet.rarefaction <- ggrare(ps_ccf2024.7, step = 200, color = "Fecal.ID", se = FALSE)
+
+```
+
+## Run Decontam to remove contaminant sequences
+
+## Load packages
+```{r load libraries for decontam}
+library(ggplot2)
+library(phyloseq)
+library(reshape2)
+library(ape)
+library(gridExtra)
+library(decontam)
+```
+
+### Decontam for USA samples
+```{r USA decontam}
+## Identify contaminants - Combined method with default threshold level
+
+# Will need to change any 0 quant readings to 0.1 for decontam to work
+
+
+
+ccf2024.comb <- isContaminant(ps_ccf2024.7, method = "combined", conc = "quant.reading", neg = "is.neg")
+head(ccf2024.comb)
+which(ccf2024.comb$contaminant)
+# there are 10: 277  618  835 1091 1105 1170 1258 1335 1336 1393
+
+# Remove all contaminants
+ccf24.noncontam <- prune_taxa(!ccf2024.comb$contaminant, ps_ccf2024.7)
+ccf24.noncontam # 1760 taxa and 53 samples
+
+# Remove chloroplast/syanobacteria
+ccf24.noncontam <- subset_taxa(ccf24.noncontam, Phylum != "Cyanobacteria/Chloroplast")
+
+# Remove negative controls and samples with LOW reads 
+sort(sample_sums(ccf24.noncontam)) # Check read count for each sample
+cleanCCF24 <- prune_samples(sample_sums(ccf24.noncontam)>=20000, ccf24.noncontam)
+
+# Filter out singletons (only occur once at 1 individual), seems to be a lot of ASVs with little info
+# Code says ASV needs to occur at least 1 time in at least 2 individuals
+ccfclean24 <- filter_taxa(cleanCCF24, function(x) {sum(x > 0) >1}, prune = TRUE) 
+ccfclean24 # 658 taxa and 45 samples
+
+sample_sums(ccfclean24)
+sort(sample_sums(ccfclean24))
+sample_data(ccfclean24)$sample <- NA
+sample_data(ccfclean24)$sample <- sample_names(ccfclean24)
+sample_data(ccfclean24)
+
+max(sample_sums(ccfclean24))/min(sample_sums(ccfclean24))
+## 2024: 4.639 ~ 4.6 fold difference between min and max number of sequences
+```
+
+
+
+# Before Alpha Diversity Calcs - run rarefaction plots
+```{r}
+# Save phyloseq object as dataframe
+dfcleanccf24 <- as(sample_data(ccfclean24), "data.frame")
+t_otu <- t(as(otu_table(ccfclean24), "matrix"))
+
+### USE ccfclean for stats
+
+####phyloseq - phylo tree with ASV labels and abundances
+myTaxa = names(sort(taxa_sums(ccfclean24),decreasing = TRUE)[1:10])
+ex1 = prune_taxa(myTaxa, ccfclean24)
+plot(phy_tree(ex1), show.node.label = TRUE)
+plot_tree(ex1, color = "SampleDay", label.tips = "Family", ladderize = "left", justify = "left", size = "Abundance")
+
+plot_richness(ccfclean24, x="SampleDay", color = "Fecal.ID", taxa_are_rows())
+plot_bar(ccfclean24, fill = "Family")
+
+install.packages("picante")
+library(picante)
+
+tree$tip.label
+
+prunedTree24 <- prune.sample(t_otu,tree)
+## pd estimates phylogentic diversity (Faith's Phylogenetic Diversity), higher Faith's PD value = more phylogenetically diverse community 
+PD <- pd(t_otu, prunedTree24, include.root = F)
+
+#need to have both alpha and df having the same column info
+PD$SampleID <- row.names(PD)
+seqs <- as.data.frame(sample_sums(ccfclean24))
+seqs$SampleID <- row.names(seqs)
+#now merge to get sequence counts and SR and PD in mapping file
+ccf.alpha_df <- merge(dfcleanccf24, PD, by = "row.names") 
+
+ccf.alpha_df_seqs <- merge(ccf.alpha_df, seqs)
+head(ccf.alpha_df_seqs)
+
+write.csv(ccf.alpha_df_seqs, "/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/Metadata_PD_CCFPT_07.26.24_final_alpha.csv")
+
+```
+
+#### Make new phyloseq files
+```{r}
+# Write out files for later use
+
+### OTU Table
+## convert feature table to matrix
+### clean1PTr2 is teh phyloseq object
+
+species_site <- as(otu_table(ccfclean24), "matrix")
+write.csv(species_site,"/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_featuretable_July2024.csv")
+
+### Taxonomy Table
+# taxon table
+tax <- as(tax_table(ccfclean24), "matrix")
+write.csv(tax,"/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_taxonomy_July2024.csv")
+
+### Sample data
+# may not need to do this unless you've added something to your metadata file such as SR and PD
+# Use the metadata table from below with PD and SR added
+meta_final <- as(sample_data(ccf.alpha_df_seqs), "data.frame")
+write.csv(meta_final, "/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_Meta_July2024.csv")
+
+# Now you can open these files to rebuild the phyloseq object for analysis 
+```
+
+# Rarefaction plot
+```{r}
+##########################################
+### RAREFACTION PLOTS
+
+## Load packages
+library(ggplot2)
+library(phyloseq)
+library(reshape2)
+library(ape)
+install.packages("gridExtra")
+library(gridExtra)
+BiocManager::install('gridExtra')
+
+scripts <- c("graphical_methods.R",
+             "tree_methods.R",
+             "plot_merged_trees.R",
+             "specificity_methods.R",
+             "ternary_plot.R",
+             "richness.R",
+             "edgePCA.R",
+             "copy_number_correction.R",
+             "import_frogs.R",
+             "prevalence.R",
+             "compute_niche.R")
+urls <- paste0("https://raw.githubusercontent.com/mahendra-mariadassou/phyloseq-extended/master/R/", scripts)
+
+for (url in urls) {
+  source(url)
+}
+
+ccf_p <- ggrare(ccfclean24, step = 200, color = "Fecal.ID", label = "SampleDay", se = FALSE)
+
+```
+
+#### If starting here: Read in "almost final" ps objects
+```{r}
+# read in feature table
+C8_feature_tab <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_featuretable_July2024.csv", header = T, row.names = 1)
+
+# Make compatible for phyloseq format
+C8_asv_tab = otu_table(C8_feature_tab, taxa_are_rows = TRUE)
+dim(C8_asv_tab)
+
+# Read in meta data file:
+C8_meta_data <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_Meta_July2024.csv", header = T, row.names = 1)
+
+# check class for sample_data (dataframe os expected)
+class(C8_meta_data)
+
+# Change quant_reading column to numeric
+C8_meta_data$quant.reading <- as.numeric(C8_meta_data$quant.reading)
+
+# Make compatible for phyloseq
+C8mf <- sample_data(C8_meta_data)
+
+# Read in taxonomy file
+C8_taxonomy <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_taxonomy_July2024.csv", row.names = 1)
+
+# Taxonomy needs to be a matrix
+C8_taxonomy <- as.matrix(C8_taxonomy)
+
+# Make compatible for phyloseq
+C8_taxonomy_final = tax_table(C8_taxonomy)
+
+###Write in DNA sequences
+C8_DNAseqs <- readDNAStringSet("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_DNAsequences.fasta")
+
+##read in tree ### 
+C8_tree = read.tree("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_exported_tree/CCFPT_2024_tree.nwk")
+
+###Merge it all together: Make a phyloseq object - psPTD = ps PoopTime Decontam object! 
+ccfclean24 <- merge_phyloseq(C8mf, C8_asv_tab, C8_taxonomy_final, C8_DNAseqs, C8_tree)
+ccfclean24 #658 taxa and 45 samples
+
+# make a dataframe from the phyloseq object
+dfccfclean24 <- as(sample_data(ccfclean24), "data.frame")
+
+```
+
+#### Additional processing:
+```{r}
+# Remove Day 6 (not enough samples passed filter)
+ccfclean_5days <- subset_samples(ccfclean24, SampleDay !="Day 6")
+# Remove Day 5 (not enough samples passed filter)
+ccfclean_4days <- subset_samples(ccfclean_5days, SampleDay !="Day 5")
+# Remove NAM6 (Day 1 and 4 did not pass filtering)
+C7d4clean <- subset_samples(ccfclean_4days, Fecal.ID != "NAM 6")
+
+# Filter ASVs out that aren't in these 7 individuals in the first 4 days
+C7d4clean <- filter_taxa(C7d4clean, function(x) {sum(x > 0) > 1}, prune = TRUE)
+
+### Use data from C7d4 to make final ps files:
+#make a dataframe from the phyloseq object
+dfC7d4 <- as(sample_data(C7d4clean), "data.frame")
+View(dfC7d4)
+```
+
+
+### Make new files for C7d4
+```{r}
+### OTU Table
+## convert feature table to matrix
+### clean1PTr2 is teh phyloseq object
+
+species_site_c7d4 <- as(otu_table(C7d4clean), "matrix")
+write.csv(species_site_c7d4,"/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/C7d4_featuretable_July2024.csv")
+
+### Taxonomy Table
+# taxon table
+tax_c7d4 <- as(tax_table(C7d4clean), "matrix")
+write.csv(tax,"/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/C7d4_taxonomy_July2024.csv")
+
+### Sample data
+# may not need to do this unless you've added something to your metadata file such as SR and PD
+# Use the metadata table from below with PD and SR added
+meta_final <- as(sample_data(ccf.alpha_df_seqs), "data.frame")
+write.csv(meta_final, "/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/C7d4_Meta_July2024.csv")
+
+
+```
+
+### Need to make new fasta file and tree
+```{r}
+library(seqateurs) # https://rdrr.io/github/alexpiper/seqateurs/man/ps_to_fasta.html
+
+ps_to_fasta(C7d4clean, out.file = "/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_DNAsequences_C7d4clean.fasta", seqnames = "unique")
+
+```
+
+#### BACK INTO TERMINAL FOR QIIME2 TO REMAKE TREE
+##########SWITCH INTO QIIME 2 using BASH TO CREATE PHYLOGENETIC TREE
+```{bash}
+conda activate qiime2-2023.7
+
+cd OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024
+
+qiime tools import \
+--input-path CCFPT_2024_DNAsequences_C7d4clean.fasta \
+--output-path CCFPT_2024_DNAsequences_C7d4clean.qza \
+--type 'FeatureData[Sequence]'
+
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+--i-sequences CCFPT_2024_DNAsequences_C7d4clean.qza \
+--o-alignment CCFPT_2024_C7d4clean_aligned_rep_seqs.qza \
+--o-masked-alignment CCFPT_2024_C7d4clean_masked_aligned_rep_seqs.qza \
+--o-tree CCFPT_2024_C7d4clean_unrooted_tree.qza \
+--o-rooted-tree CCFPT_2024_C7d4clean_rooted_tree.qza
+
+
+## Need to rename tree to informative name after output
+qiime tools export \
+--input-path CCFPT_2024_C7d4clean_rooted_tree.qza \
+--output-path CCFPT_2024_C7d4clean_exported_tree
+```
+
+#### Recalculate PD and SR with new tree
+```{r}
+
+# Save phyloseq object as dataframe
+dfC7d4clean <- as(sample_data(C7d4clean), "data.frame")
+t_otu24 <- t(as(otu_table(C7d4clean), "matrix"))
+
+### USE ccfclean for stats
+
+####phyloseq - phylo tree with ASV labels and abundances
+myTaxa24 = names(sort(taxa_sums(C7d4clean),decreasing = TRUE)[1:10])
+ex24 = prune_taxa(myTaxa24, C7d4clean)
+plot(phy_tree(ex24), show.node.label = TRUE)
+plot_tree(ex24, color = "SampleDay", label.tips = "Family", ladderize = "left", justify = "left", size = "Abundance")
+
+plot_richness(C7d4clean, x="SampleDay", color = "Fecal.ID", taxa_are_rows())
+plot_bar(C7d4clean, fill = "Family")
+
+install.packages("picante")
+library(picante)
+
+tree$tip.label
+
+prunedTree24 <- prune.sample(t_otu24,tree)
+## pd estimates phylogentic diversity (Faith's Phylogenetic Diversity), higher Faith's PD value = more phylogenetically diverse community 
+PD <- pd(t_otu, prunedTree24, include.root = F)
+
+#need to have both alpha and df having the same column info
+PD$SampleID <- row.names(PD)
+seqs <- as.data.frame(sample_sums(ccfclean24))
+seqs$SampleID <- row.names(seqs)
+#now merge to get sequence counts and SR and PD in mapping file
+ccf.alpha_df <- merge(dfcleanccf24, PD, by = "row.names") 
+
+ccf.alpha_df_seqs <- merge(ccf.alpha_df, seqs)
+head(ccf.alpha_df_seqs)
+
+write.csv(ccf.alpha_df_seqs, "/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/Metadata_PD_CCFPT_07.26.24_final_alpha.csv")
+
+```

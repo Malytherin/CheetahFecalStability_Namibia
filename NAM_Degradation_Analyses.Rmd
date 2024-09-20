@@ -1,0 +1,685 @@
+---
+title: "NAM_Degradation_Analyses"
+author: "M. Maly"
+date: "2024-07-29"
+output: html_document
+---
+
+### Load libraries
+```{r}
+library(dada2)
+library(stats)
+library(Biostrings)
+library(ShortRead)
+library(phyloseq)
+library(ggplot2)
+library(lme4)
+library(car)
+library(pairwiseAdonis)
+library(vegan)
+library(lattice)
+library(nlme)
+library(MuMIn)
+library(emmeans)
+library(ggpubr)
+library(rstatix)
+library(RVAideMemoire)
+```
+
+### Load color schemes
+```{r}
+fave8colors <- c("#ffa600", "#ff7c43", "#f95d6a", "#d45087", "#a05195", "#665191","#2f4b7c","#003f5c")
+fave6colors <- c("#ffa600", "#ff6e54","#dd5182","#955196","#444e86","#003f5c")
+revfav6 <- c("#003f5c","#444e86","#955196","#dd5182","#ff6e54","#ffa600")
+
+col6 <- c("#ffa600", "#3aba4d","#dd5182","#955196","#0f7ed9","#003f5c")
+
+```
+
+### Load phyloseq object C8
+```{r, echo=FALSE}
+# read in feature table
+C8_feature_tab <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_featuretable_July2024.csv", header = T, row.names = 1)
+
+# Make compatible for phyloseq format
+C8_asv_tab = otu_table(C8_feature_tab, taxa_are_rows = TRUE)
+dim(C8_asv_tab)
+
+# Read in meta data file:
+C8_meta_data <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_Meta_July2024.csv", header = T, row.names = 1)
+
+# check class for sample_data (dataframe os expected)
+class(C8_meta_data)
+
+# Change quant_reading column to numeric
+C8_meta_data$quant.reading <- as.numeric(C8_meta_data$quant.reading)
+
+# Make compatible for phyloseq
+C8mf <- sample_data(C8_meta_data)
+
+# Read in taxonomy file
+C8_taxonomy <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_taxonomy_July2024.csv", row.names = 1)
+
+# Taxonomy needs to be a matrix
+C8_taxonomy <- as.matrix(C8_taxonomy)
+
+# Make compatible for phyloseq
+C8_taxonomy_final = tax_table(C8_taxonomy)
+
+###Write in DNA sequences
+C8_DNAseqs <- readDNAStringSet("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_DNAsequences.fasta")
+
+##read in tree ### 
+C8_tree = read.tree("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_exported_tree/CCFPT_2024_tree.nwk")
+
+###Merge it all together: Make a phyloseq object - psPTD = ps PoopTime Decontam object! 
+C8 <- merge_phyloseq(C8mf, C8_asv_tab, C8_taxonomy_final, C8_DNAseqs, C8_tree)
+C8 #658 taxa and 45 samples
+
+# make a dataframe from the phyloseq object
+dfC8 <- as(sample_data(C8), "data.frame")
+```
+
+
+#### Additional processing:
+```{r}
+# Remove Day 6 (not enough samples passed filter)
+C8_5days <- subset_samples(C8, SampleDay !="Day 6")
+# Remove Day 5 (not enough samples passed filter)
+C8_4days <- subset_samples(C8_5days, SampleDay !="Day 5")
+# Remove NAM6 (Day 1 and 4 did not pass filtering)
+C7d4 <- subset_samples(C8_4days, Fecal.ID != "NAM 6")
+
+# Filter ASVs out that aren't in these 7 individuals in the first 4 days
+C7d4 <- filter_taxa(C7d4, function(x) {sum(x > 0) > 1}, prune = TRUE)
+
+### Use data from C7d4 to make final ps files:
+#make a dataframe from the phyloseq object
+dfC7d4 <- as(sample_data(C7d4), "data.frame")
+View(dfC7d4)
+
+```
+
+
+### Summary stats
+```{r}
+sum(sample_sums(C7d4)) # 5,031,818
+max(sample_sums(C7d4))/min(sample_sums(C7d4)) # 4.65
+max(sample_sums(C7d4)) #330,423
+min(sample_sums(C7d4)) #71,066
+median(sample_sums(C7d4)) #140,720
+mean(sample_sums(C7d4)) #157,244.3
+C7d4
+
+get_taxa_unique(C7d4, taxonomic.rank = "Phylum")
+
+mean(dfC7d4$SR)
+sd(dfC7d4$SR)
+
+mean(dfC7d4$PD)
+sd(dfC7d4$PD)
+
+
+```
+
+## General features and info
+
+### Relative Abundance of Phyla in ALL samples
+```{r}
+# Get mean relative abundance and number of taxa for each Phyla OVERALL (this is NOT by individual day)
+
+# Bacteroidetes
+100*sum(taxa_sums(subset_taxa(C7d4, Phylum == "Bacteroidetes")))/sum(taxa_sums(C7d4))
+# Mean abundance = 30.00 %
+ntaxa(subset_taxa(C7d4, Phylum == "Bacteroidetes"))
+# Number of ASVs = 83
+
+# Proteobacteria
+100*sum(taxa_sums(subset_taxa(C7d4, Phylum == "Proteobacteria")))/sum(taxa_sums(C7d4))
+# Mean abundance = 2.93%
+ntaxa(subset_taxa(C7d4, Phylum == "Proteobacteria"))
+# Number of ASVs = 114
+
+# Firmicutes
+100*sum(taxa_sums(subset_taxa(C7d4, Phylum == "Firmicutes")))/sum(taxa_sums(C7d4))
+# Mean abundance = 43.14%
+ntaxa(subset_taxa(C7d4, Phylum == "Firmicutes"))
+# Number of ASVs = 268
+
+# Fusobacteria
+100*sum(taxa_sums(subset_taxa(C7d4, Phylum == "Fusobacteria")))/sum(taxa_sums(C7d4))
+# Mean abundance = 15.57%
+ntaxa(subset_taxa(C7d4, Phylum == "Fusobacteria"))
+# Number of ASVs = 28
+
+# Actinobacteria
+100*sum(taxa_sums(subset_taxa(C7d4, Phylum == "Actinobacteria")))/sum(taxa_sums(C7d4))
+# Mean abundance = 8.34%
+ntaxa(subset_taxa(C7d4, Phylum == "Actinobacteria"))
+# Number of ASVs = 79
+
+# Deinococcus-Thermus
+100*sum(taxa_sums(subset_taxa(C7d4, Phylum == "Deinococcus-Thermus")))/sum(taxa_sums(C7d4))
+# Mean abundance = 0.0007%
+ntaxa(subset_taxa(C7d4, Phylum == "Deinococcus-Thermus"))
+# Number of ASVs = 1
+
+# Candidatus_Saccharibacteria
+100*sum(taxa_sums(subset_taxa(C7d4, Phylum == "Candidatus_Saccharibacteria")))/sum(taxa_sums(C7d4))
+# Mean abundance = 0.001%
+ntaxa(subset_taxa(C7d4, Phylum == "Candidatus_Saccharibacteria"))
+# Number of ASVs = 2
+
+# Chloroflexi
+100*sum(taxa_sums(subset_taxa(C7d4, Phylum == "Chloroflexi")))/sum(taxa_sums(C7d4))
+# Mean abundance = 0.001%
+ntaxa(subset_taxa(C7d4, Phylum == "Chloroflexi"))
+# Number of ASVs = 1
+```
+
+#### Relative abundance of Fresh Samples (Day 0) from Namibian cheetahs
+```{r}
+# Remove all days except fresh 
+C7d4_fresh <- subset_samples(C7d4, SampleDay =="Day 0")
+
+# Filter ASVs out that aren't in these 6 individuals in the first 4 days
+C7d4_fresh <- filter_taxa(C7d4_fresh, function(x) {sum(x > 0) > 1}, prune = TRUE)
+
+#make a dataframe from the phyloseq object
+dfC7d4_fresh <- as(sample_data(C7d4_fresh), "data.frame")
+
+
+# FRESH Phyla---- 
+get_taxa_unique(C7d4_fresh, taxonomic.rank = "Phylum") 
+
+# Descriptive stats for SR and PD
+mean(dfC7d4_fresh$SR) # 162.43
+sd(dfC7d4_fresh$SR) # 46.71
+
+mean(dfC7d4_fresh$PD) # 7.10
+sd(dfC7d4_fresh$PD) # 2.08
+
+# Get mean relative abundance and number of taxa for each Phyla OVERALL (this is NOT by sample day)
+
+# Bacteroidetes
+100*sum(taxa_sums(subset_taxa(C7d4_fresh, Phylum == "Bacteroidetes")))/sum(taxa_sums(C7d4_fresh))
+# Mean abundance = 28.1 %
+ntaxa(subset_taxa(C7d4_fresh, Phylum == "Bacteroidetes"))
+# Number of ASVs = 34
+
+# Proteobacteria
+100*sum(taxa_sums(subset_taxa(C7d4_fresh, Phylum == "Proteobacteria")))/sum(taxa_sums(C7d4_fresh))
+# Mean abundance = 2.91%
+ntaxa(subset_taxa(C7d4_fresh, Phylum == "Proteobacteria"))
+# Number of ASVs = 13
+
+# Firmicutes
+100*sum(taxa_sums(subset_taxa(C7d4_fresh, Phylum == "Firmicutes")))/sum(taxa_sums(C7d4_fresh))
+# Mean abundance = 41.2%
+ntaxa(subset_taxa(C7d4_fresh, Phylum == "Firmicutes"))
+# Number of ASVs = 114
+
+# Fusobacteria
+100*sum(taxa_sums(subset_taxa(C7d4_fresh, Phylum == "Fusobacteria")))/sum(taxa_sums(C7d4_fresh))
+# Mean abundance = 16.39%
+ntaxa(subset_taxa(C7d4_fresh, Phylum == "Fusobacteria"))
+# Number of ASVs = 14
+
+# Actinobacteria
+100*sum(taxa_sums(subset_taxa(C7d4_fresh, Phylum == "Actinobacteria")))/sum(taxa_sums(C7d4_fresh))
+# Mean abundance = 11.41%
+ntaxa(subset_taxa(C7d4_fresh, Phylum == "Actinobacteria"))
+# Number of ASVs = 18
+
+```
+
+### Relative Abundance Plots
+
+#### Relative Abundance of Phyla by Sample Day
+```{r}
+library(scales)
+
+# By PHYLUM
+get_taxa_unique(C7d4, "Phylum")
+C7d4_p1 <- tax_glom(C7d4, taxrank = 'Phylum')
+# could skip merge_samples if don't want to merge
+C7d4_p2= merge_samples(C7d4_p1, "SampleDay")
+C7d4_p2@sam_data
+C7d4_p2 <- transform_sample_counts(C7d4_p2, function(x) x/sum(x))
+#C7d4_p2 <- transform_sample_counts(C7d4_p1, function(x) x/sum(x))
+C7d4_p3 <- psmelt(C7d4_p2)
+C7d4_p3$Phylum <- as.character(C7d4_p3$Phylum)
+
+C7d4_p3$Phylum[C7d4_p3$Abundance < 0.01] <- "Phyla < 1% abund."
+
+# Plot phyla relative abundance with SampleDay on x axis and facet wrap by Fecal.ID
+plot.rel.ab.C7d4p <- ggplot(data=C7d4_p3, aes(x=Sample, y=Abundance, fill=Phylum))
+C7d4_P.RA <- plot.rel.ab.C7d4p + 
+  geom_bar(aes(), stat="identity", position="stack", width = 0.85) +
+  ylab("Relative abundance \n(fraction of total sequences)") +
+  theme_classic() + 
+  labs(x ="") + 
+  theme(text = element_text(size = 20)) + 
+  scale_fill_manual(values=revfav6,name="Phylum") +
+  labs(tag = "A") + 
+  theme(plot.tag = element_text(size = 25)) +
+  scale_y_continuous(labels = wrap_format(1))
+```
+
+### Alpha Diversity 
+
+#### C7d4 Alpha SR - Linear mixed models and normality tests
+```{r}
+# For more info check this tutorial: # (https://ademos.people.uic.edu/Chapter18.html) 
+
+# Species Richness: build linear mixed effects model with Fecal.IO as random effect
+C7d4lmer_SR <- lmer(SR ~ SampleDay + (1|Fecal.ID), data = dfC7d4, REML = FALSE)
+
+summary(C7d4lmer_SR) # doesn't give you a p val so need to run the lmer as an Anova for null hypothesis testing
+Anova(C7d4lmer_SR) #p val for SR by SampleDay = 0.9432 (not significant)
+plot(C7d4lmer_SR) #distribution of residuals (want random)
+# No emmeans post hoc because it is NOT significant
+
+ranef(C7d4lmer_SR) # examines the random effects
+
+# Check ASSUMPTIONS of:
+# 1 - Linearity
+Plot.C7d4lmerSR.Linearity <- plot(resid(C7d4lmer_SR), dfC7d4$SR) 
+# 2 - Homogeneity of Variance
+dfC7d4lmerSR <- dfC7d4 # make a new data frame to add columns to
+dfC7d4lmerSR$Model.SR.Res <- residuals(C7d4lmer_SR) # extracts the residuals and places them in a new column in our original data table
+dfC7d4lmerSR$Abs.Model.SR.Res <- abs(dfC7d4lmerSR$Model.SR.Res) # creates a new column with the absolute value of the residuals
+dfC7d4lmerSR$Model.SR.Res2 <- dfC7d4lmerSR$Abs.Model.SR.Res^2 # squares the absolute value of the residuals to provide the more robust estimate
+Levene.Model.C7d4lmer.SR <- lm(Model.SR.Res2 ~ SampleDay, data = dfC7d4lmerSR) #ANOVA pf the squared residuals 
+anova(Levene.Model.C7d4lmer.SR) # displays the results, WANT p > 0.05. (IT IS p = 0.6692)
+# This means variance of the residuals is equal and therefore the assumption of homoscedasticity is met.
+
+hist(dfC7d4$SR)
+
+# 3 - The residuals of the model are normally distributed
+require("lattice")
+qqmath(C7d4lmer_SR, id=0.05) #id: identifies values that may be exerting undue influence on the model (i.e. outliers)
+# There is some deviation from from the expected normal line towards the tails, but overall the line looks straight and therefore pretty normal and suggests that the assumption is not violated. 
+
+qqnorm(resid(C7d4lmer_SR)) #get Normal Q-Q plot for the model 
+
+```
+
+### Alpha Diversity Plots
+
+#### C6 Plot Alpha Diversity of SR (model is NOT significant)
+```{r}
+library(dplyr)
+
+dfC7d4SR_sumstats <- dfC7d4 %>%
+  group_by(SampleDay) %>%
+  summarize(average = mean(SR),
+            stdev = sd(SR)) %>%
+  ungroup()
+View(dfC7d4SR_sumstats)
+
+# Plot SR by Sample Day
+ggplot(data = dfC7d4, aes(x=SampleDay, y=SR)) + 
+  geom_boxplot()+theme_classic()+
+  theme(text = element_text(size = 20)) + 
+  ylab("Species Richness") + 
+  xlab("") + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+C7d4sr <- ggplot(dfC7d4, aes(x = SampleDay, y= SR, fill = SampleDay)) + 
+  geom_boxplot() + 
+  theme_bw() + 
+  theme_classic() + 
+  scale_fill_manual(values=col6,name="SampleDay") + 
+  ylab("Species Richness") + 
+  geom_jitter(width = 0.1) + 
+  stat_summary(fun = "mean", shape = 5, color = "black") + 
+  theme(legend.position = "none") + 
+  labs(tag = "A") + 
+  theme(plot.tag = element_text(size = 25))
+  
+
+# Create dataframe with average SR values for each Sample Day
+dfC7d4SR_mean <- dfC7d4 %>%
+  group_by(SampleDay) %>%
+  summarize(average = mean(SR)) %>%
+  ungroup()
+View(dfC7d4SR_mean)
+
+# Box plot of SR by Sample Day with lines connecting mean values
+C7d4sr <- dfC7d4 %>% 
+  ggplot(mapping = aes(x = SampleDay, y = SR, fill = SampleDay)) +
+  geom_boxplot() +
+  geom_point(data = dfC7d4SR_mean,
+             mapping = aes(x = SampleDay, y = average),
+             color = "black",
+             shape = 5) +
+  geom_jitter(width = 0.1) + 
+  ylab("Species Richness") +
+  xlab("") +
+  scale_fill_manual(values = col6) +
+  theme_classic()  + 
+  theme(legend.position = "none") + 
+  labs(tag = "A") + 
+  theme(text = element_text(size = 20)) + 
+  theme(plot.tag = element_text(size = 25))
+```
+
+
+### C6 Alpha PD - Linear mixed models and normality tests
+```{r}
+# For more info check this tutorial: # (https://ademos.people.uic.edu/Chapter18.html) 
+
+# Faith's PD: build linear mixed effects model with Fecal.IO as random effect
+C7d4lmer_PD <- lmer(PD ~ SampleDay + (1|Fecal.ID), data = dfC7d4, REML = FALSE)
+summary(C7d4lmer_PD) # doesn't give you a p val so need to run the lmer as an Anova for null hypothesis testing
+Anova(C7d4lmer_PD) #p val for SR by SampleDay = 0.9161 (not significant)
+plot(C7d4lmer_PD) #distribution of residuals (want random)
+
+ranef(C7d4lmer_PD) # examines the random effects
+
+# Check ASSUMPTIONS of:
+# 1 - Linearity
+Plot.C7d4lmerPD.Linearity <- plot(resid(C7d4lmer_PD), dfC7d4$PD) 
+# 2 - Homogeneity of Variance
+dfC7d4lmerPD <- dfC7d4 # make a new data frame to add columns to
+dfC7d4lmerPD$Model.PD.Res <- residuals(C7d4lmer_PD) # extracts the residuals and places them in a new column in our original data table
+dfC7d4lmerPD$Abs.Model.PD.Res <- abs(dfC7d4lmerPD$Model.PD.Res) # creates a new column with the absolute value of the residuals
+dfC7d4lmerPD$Model.PD.Res2 <- dfC7d4lmerPD$Abs.Model.PD.Res^2 # squares the absolute value of the residuals to provide the more robust estimate
+Levene.Model.C7d4lmer.PD <- lm(Model.PD.Res2 ~ SampleDay, data = dfC7d4lmerPD) #ANOVA pf the squared residuals 
+anova(Levene.Model.C7d4lmer.PD) # displays the results, WANT p > 0.05. (IT IS p = 0.6123)
+# This means variance of the residuals is equal and therefore the assumption of homoscedasticity is met.
+
+# 3 - The residuals of the model are normally distributed
+require("lattice")
+qqmath(C7d4lmer_PD, id=0.05) #id: identifies values that may be exerting undue influence on the model (i.e. outliers)
+# There is some deviation from from the expected normal line towards the tails, but overall the line looks straight and therefore pretty normal and suggests that the assumption is not violated. 
+
+# check distribution of PD
+hist(dfC7d4lmerPD$PD)
+
+
+# Levene's test - normality (does not include random effect of Fecal.ID)
+leveneTest(PD ~ SampleDay, dfC7d4lmerPD) #again want > 0.05 to pass test of normality (it is!)
+# p = 0.9334
+```
+
+
+Plot Alpha Diversity of PD - Not accounting for random effect (model is NOT significant)
+```{r}
+# Plot PD by Sample Day
+
+dfC7d4PD_sumstats <- dfC7d4 %>%
+  group_by(SampleDay) %>%
+  summarize(average = mean(PD),
+            stdev = sd(PD)) %>%
+  ungroup()
+View(dfC7d4PD_sumstats)
+
+# Create dataframe with average SR values for each SampleDay
+dfC7d4PD_mean <- dfC7d4 %>%
+  group_by(SampleDay) %>%
+  summarize(average = mean(PD)) %>%
+  ungroup()
+View(dfC7d4PD_mean)
+
+# Box plot of SR by Sample Day with lines connecting mean values
+C7d4pd <- dfC7d4 %>% 
+  ggplot(mapping = aes(x = SampleDay, y = PD, fill = SampleDay)) +
+  geom_boxplot() +
+  geom_point(data = dfC7d4PD_mean,
+             mapping = aes(x = SampleDay, y = average),
+             color = "black",
+             shape = 5) +
+  geom_jitter(width = 0.1) + 
+  ylab("Faith's \n Phylogenetic Diversity") +
+  scale_fill_manual(values = col6) +
+  theme_classic() + 
+  theme(text = element_text(size = 20)) + 
+  theme(legend.position = "none") + 
+  labs(tag = "B") + 
+  xlab("") +
+  theme(plot.tag = element_text(size = 25))
+  
+# Combine SR and PD plots into one
+library(patchwork)
+C7d4sr + C7d4pd + plot_layout(nrow = 2)
+
+```
+
+### Beta Diversity
+
+#### C7d4 Bray- Curtis
+```{r}
+# Create distance measurements and matrix
+bray_C7d4 <- phyloseq::distance(C7d4, "bray")
+
+# Create PCoA plot
+bray_C7d4.ord <- ordinate(C7d4, method = "PCoA", bray_C7d4)
+C7d4_bray <- plot_ordination(C7d4, bray_C7d4.ord, axes = c(1,2), color = "SampleDay")
+C7d4Bray1 <- C7d4_bray + 
+  geom_point(size=5) + 
+  theme_classic() + 
+  theme(text = element_text(size=20)) + 
+  stat_ellipse(aes(group=SampleDay)) + 
+  scale_color_manual(values = col6) +
+  labs(tag = "C", shape = "Fecal ID")
+C7d4Bray1
+
+#no ellipses
+C7d4Bray2 <- C7d4_bray + 
+  geom_point(size=4)  + 
+  theme_classic() + 
+  theme(text = element_text(size=15)) + 
+  scale_shape_manual(values = c(15,16,17,18,0,1,24,2,5))
+C7d4Bray2 + ggtitle("C7d4 Bray Curtis")
+
+#Calculate PERMANOVA
+
+# Note strata is deprecated: define blocks in 'permutations'
+perm <- how(nperm = 999)
+setBlocks(perm) <- with(dfC7d4, Fecal.ID) 
+
+adonis2(bray_C7d4 ~ SampleDay, data = dfC7d4, permutations = perm)
+# significant: p = 0.009, R2 = 0.12752, F = 0.9866, df = 4
+
+# Pairwise PERMANOVA - Limits permutations to within Fecal.ID
+pairwise.adonis2(bray_C7d4 ~ SampleDay, data = dfC7d4, strata = 'Fecal.ID')
+#             SumofSqs      R2        F     Pr(>F)
+# Day 0 v 1   0.16347     0.06346   0.8132  0.09375
+# Day 0 v 2   0.18598     0.06595   0.8473  0.1875
+# Day 0 v 3   0.33788     0.13208   1.8262  0.01562
+# Day 0 v 4   0.25268     0.119     1.2156  0.1875
+# Day 1 v 2                                 0.3906
+# Day 1 v 3                                 0.0625
+# Day 1 v 4                                 0.1875
+# Day 2 v 3                                 0.1875
+# Day 2 v 4                                 0.0625
+# Day 3 v 4                                 0.0625
+
+# Adjust pairwise permanova p values
+BC_ALLpvals <- c(0.09375, 0.1875, 0.01562, 0.1875, 0.3906, 0.0625, 0.1875, 0.1875, 0.0625, 0.0625)
+p.adjust(BC_ALLpvals, method = "bonferroni")# none are significant
+p.adjust(BC_ALLpvals, method = "fdr") # none are significant
+
+```
+
+#### BC Check dispersion between Sample Days
+```{r}
+
+# Check dispersion between sample days
+## SuperOrder ##
+dfC7d4$SampleDay <- as.factor(dfC7d4$SampleDay)
+groups <- dfC7d4[["SampleDay"]]
+class(groups)
+levels(groups) #
+# this is betadisper(distance matric, variable)
+C7d4_disp <- betadisper(bray_C7d4, groups, type = "centroid")
+anova(C7d4_disp) # non significant dispersion (p=0.5443), different days have similar dispersion
+plot(C7d4_disp, cex = 0)
+boxplot(C7d4_disp)
+```
+
+#### Jaccard
+```{r}
+# Create distance measurements and matrix
+jac_C7d4 <- phyloseq::distance(C7d4, "jaccard", binary = TRUE)
+
+# Create PCoA plot
+jac_C7d4.ord <- ordinate(C7d4, method = "PCoA", jac_C7d4)
+C7d4_jac <- plot_ordination(C7d4, jac_C7d4.ord, axes = c(1,2), color = "SampleDay")
+C7d4jac1 <- C7d4_jac + 
+  geom_point(size=5) + 
+  theme_classic() + 
+  theme(text = element_text(size=20)) + 
+  stat_ellipse(aes(group=SampleDay)) + 
+  scale_color_manual(values = col6) +
+  labs(tag = "B") +
+  theme(legend.position = "none")
+C7d4jac1 
+
+#Calculate PERMANOVA
+
+# Note strata is deprecated: define blocks in 'permutations'
+perm <- how(nperm = 999)
+setBlocks(perm) <- with(dfC7d4, Fecal.ID)
+
+adonis2(jac_C7d4 ~ SampleDay, data = dfC7d4, permutations = perm)
+# Significant: p = 0.059, R2 = 0.07709, F = 0.5638, df = 4
+```
+
+#### Jaccard Check dispersion between sample days
+
+```{r}
+# Check dispersion between sample days
+
+## SuperOrder ##
+dfC7d4$SampleDay <- as.factor(dfC7d4$SampleDay)
+groups <- dfC7d4[["SampleDay"]]
+class(groups)
+levels(groups) #
+# this is betadisper(distance matric, variable)
+C7d4_disp <- betadisper(jac_C7d4, groups, type = "centroid")
+anova(C7d4_disp) # non significant dispersion (p=0.2571), different days have similar dispersion
+plot(C7d4_disp, cex = 0)
+boxplot(C7d4_disp)
+```
+
+#### Unweighted Unifrac
+```{r}
+# Create distance measurements and matrix
+unweigh_C7d4 <- phyloseq::distance(C7d4, "unifrac")
+
+# Create PCoA plot
+unw_C7d4.ord <- ordinate(C7d4, method = "PCoA", unweigh_C7d4)
+C7d4_unw <- plot_ordination(C7d4, unw_C7d4.ord, axes = c(1,2), color = "SampleDay")
+C7d4unw1 <- C7d4_unw + 
+  geom_point(size=4) + 
+  theme_classic() + 
+  theme(text = element_text(size=20)) + 
+  scale_color_manual(values = col6) +
+  stat_ellipse(aes(group=SampleDay)) +
+  labs(tag = "C")
+  
+C7d4unw1
+
+#Calculate PERMANOVA
+library(pairwiseAdonis)
+# Note strata is deprecated: define blocks in 'permutations'
+
+
+perm <- how(nperm = 999)
+setBlocks(perm) <- with(dfC7d4, Fecal.ID)
+
+adonis2(unweigh_C7d4 ~ SampleDay, data = dfC7d4, permutations = perm)
+# NOT significant: p = 0.18, R2 = 0.05639, F = 0.4034, df = 4
+
+```
+
+#### Unweighted UniFrac Dispersion
+```{r}
+# Check dispersion between sample days
+## SuperOrder ##
+dfC7d4$SampleDay <- as.factor(dfC7d4$SampleDay)
+groups <- dfC7d4[["SampleDay"]]
+class(groups)
+levels(groups) #
+# this is betadisper(distance matric, variable)
+C7d4_disp <- betadisper(unweigh_C7d4, groups, type = "centroid")
+anova(C7d4_disp) # non significant dispersion (p=0.7535), different days have similar dispersion
+plot(C7d4_disp, cex = 0)
+boxplot(C7d4_disp)
+```
+
+# Make Beta Diversity Figure - Jaccard and BC Plots
+```{r}
+library(patchwork)
+C7d4Bray1 + C7d4jac1 + plot_layout()
+
+```
+
+# C7d4 FIGURE 1
+```{r}
+layoutC7d4Fig1 <- "
+AAAAAAAA
+AAAAAAAA
+AAAAAAAA
+AAAAAAAA
+AAAAAAAA
+BBBBBBBB
+BBBBBBBB
+BBBBBBBB
+BBBBBBBB
+BBBBBBBB
+CCCCCCCC
+CCCCCCCC
+CCCCCCCC
+CCCCCCCC
+CCCCCCCC
+CCCCCCCC
+CCCCCCCC"
+
+C7d4_P.RA + C7d4pd + C7d4Bray1 + plot_layout(design = layoutC7d4Fig1)
+
+```
+
+Supplemental Figure 1       
+```{r}
+layoutC7d4Fig_S1 <- "
+AAAAAAAAAA
+AAAAAAAAAA
+AAAAAAAAAA
+AAAAAAAAAA
+BBBBBCCCCC
+BBBBBCCCCC
+BBBBBCCCCC
+BBBBBCCCCC"
+
+C7d4sr + C7d4jac1 + C7d4unw1 + plot_layout(design = layoutC7d4Fig_S1)
+
+
+```
+
+### Differential abundance testing
+```{r}
+# ANCOM BC
+library(ANCOMBC)
+
+tse = mia::makeTreeSummarizedExperimentFromPhyloseq(C7d4)
+print(tse)
+
+out_abc <- ancombc2(C7d4, 
+                    tax_level = "Genus",
+                    fix_formula = "SampleDay",
+                    rand_formula = "Fecal.ID",
+                    p_adj_method = "fdr",
+                    group = "SampleDay")
+
+res = out_abc$res
+res_global = out_abc$res_global
+
+
+#### Maaslin2
+library(Maaslin2)
+input_data <- system.file('extdata', "/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_taxonomy_July2024.csv", package = )
+```

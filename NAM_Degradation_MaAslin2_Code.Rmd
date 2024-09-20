@@ -1,0 +1,122 @@
+---
+title: "C7d4_Maaslin2"
+author: "M. Maly"
+date: "2024-08-18"
+output: html_document
+---
+
+### Load libraries
+```{r}
+library(phyloseq)
+library(Maaslin2)
+library(Biostrings)
+library(stats)
+library(ShortRead)
+library(ape)
+library(ggplot2)
+library(lme4)
+library(car)
+```
+
+### Data import
+```{r phyloseq obj}
+# read in feature table
+C8_feature_tab <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_featuretable_July2024.csv", header = T, row.names = 1)
+
+# Make compatible for phyloseq format
+C8_asv_tab = otu_table(C8_feature_tab, taxa_are_rows = TRUE)
+dim(C8_asv_tab)
+
+# Read in meta data file:
+C8_meta_data <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_Meta_July2024.csv", header = T, row.names = 1)
+
+# check class for sample_data (dataframe os expected)
+class(C8_meta_data)
+
+# Change quant_reading column to numeric
+C8_meta_data$quant.reading <- as.numeric(C8_meta_data$quant.reading)
+
+# Make compatible for phyloseq
+C8mf <- sample_data(C8_meta_data)
+
+# Read in taxonomy file
+C8_taxonomy <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_taxonomy_July2024.csv", row.names = 1)
+
+# Taxonomy needs to be a matrix
+C8_taxonomy <- as.matrix(C8_taxonomy)
+
+# Make compatible for phyloseq
+C8_taxonomy_final = tax_table(C8_taxonomy)
+
+###Write in DNA sequences
+C8_DNAseqs <- readDNAStringSet("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_DNAsequences.fasta")
+
+##read in tree ### 
+C8_tree = read.tree("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_exported_tree/CCFPT_2024_tree.nwk")
+
+###Merge it all together: Make a phyloseq object - psPTD = ps PoopTime Decontam object! 
+C8 <- merge_phyloseq(C8mf, C8_asv_tab, C8_taxonomy_final, C8_DNAseqs, C8_tree)
+C8 #658 taxa and 45 samples
+
+# Remove Day 6 (not enough samples passed filter)
+C8_5days <- subset_samples(C8, SampleDay !="Day 6")
+# Remove Day 5 (not enough samples passed filter)
+C8_4days <- subset_samples(C8_5days, SampleDay !="Day 5")
+# Remove NAM6 (Day 1 and 4 did not pass filtering)
+C7d4 <- subset_samples(C8_4days, Fecal.ID != "NAM 6")
+
+# Filter ASVs out that aren't in these 7 individuals in the first 4 days
+C7d4 <- filter_taxa(C7d4, function(x) {sum(x > 0) > 1}, prune = TRUE)
+
+### Use data from C7d4 to make final ps files:
+#make a dataframe from the phyloseq object
+dfC7d4 <- as(sample_data(C7d4), "data.frame")
+View(dfC7d4)
+
+```
+
+#### Import Maaslin2 data
+```{r}
+
+# should be feature table with species as columns and samples as rows
+C7d4_feature_tab <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_Maaslin2/C7d4_featuretable_July2024_Maaslin2.csv", header = T, row.names = 1)
+View(C7d4_feature_tab)
+
+C7d4_feature_Maas <- t(C7d4_feature_tab)
+
+C7d4_meta_Maas <- read.csv("/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCFPT_2024_Maaslin2/C7d4_Meta_July2024_Maaslin2.csv", header = T, row.names = 1)
+
+View(C7d4_meta_Maas)
+
+# Check the first few rows of the data
+row.names(C7d4_feature_Maas)
+row.names(C7d4_meta_Maas)
+
+# Ensure the variables in metadata are factors or characters
+C7d4_meta_Maas$SampleDay <- factor(C7d4_meta_Maas$SampleDay)
+C7d4_meta_Maas$Fecal.ID <- factor(C7d4_meta_Maas$Fecal.ID)
+
+levels(C7d4_meta_Maas$SampleDay)
+
+C7d4_meta_Maas2 <- C7d4_meta_Maas[,c("SampleDay", "Fecal.ID")]
+
+# Check the reference argument to make sure it is correctly formatted as a named list
+reference_list <- list(SampleDay = "Day 0")
+
+# Define the formula for fixed and random effects
+fixed_effects <- c("SampleDay")
+random_effects <- c("Fecal.ID")
+
+# Run MaAslin2
+fit_data <- Maaslin2(
+  input_data = C7d4_feature_Maas,
+  input_metadata = C7d4_meta_Maas2,
+  output = "maaslin2_output",
+  fixed_effects = fixed_effects,
+  random_effects = random_effects,
+  reference = list(SampleDay = "Day 0"),
+  max_significance = 0.05
+)
+
+
+```
