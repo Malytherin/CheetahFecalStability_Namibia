@@ -650,26 +650,3 @@ C7d4sr + C7d4jac1 + C7d4unw1 + plot_layout(design = layoutC7d4Fig_S1)
 
 ```
 
-### Differential abundance testing
-```{r}
-# ANCOM BC
-library(ANCOMBC)
-
-tse = mia::makeTreeSummarizedExperimentFromPhyloseq(C7d4)
-print(tse)
-
-out_abc <- ancombc2(C7d4, 
-                    tax_level = "Genus",
-                    fix_formula = "SampleDay",
-                    rand_formula = "Fecal.ID",
-                    p_adj_method = "fdr",
-                    group = "SampleDay")
-
-res = out_abc$res
-res_global = out_abc$res_global
-
-
-#### Maaslin2
-library(Maaslin2)
-input_data <- system.file('extdata', "/Users/morganmaly/OneDrive - Smithsonian Institution/CheetahGutMicrobiome/Cheetah_CCFPT/CCFPT_Feb2020/CCFPT_Files/CCFPT_Analyses/CCFPT_2024/CCF8_taxonomy_July2024.csv", package = )
-```
