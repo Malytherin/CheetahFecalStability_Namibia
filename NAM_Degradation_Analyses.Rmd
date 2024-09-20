@@ -543,7 +543,6 @@ perm <- how(nperm = 999)
 setBlocks(perm) <- with(dfC7d4, Fecal.ID)
 
 adonis2(jac_C7d4 ~ SampleDay, data = dfC7d4, permutations = perm)
-# Output: p = 0.059, R2 = 0.07709, F = 0.5638, df = 4
 ```
 
 #### Jaccard Check dispersion between sample days
