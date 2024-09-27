@@ -97,8 +97,6 @@ C7d4 <- filter_taxa(C7d4, function(x) {sum(x > 0) > 1}, prune = TRUE)
 ### Use data from C7d4 to make final ps files:
 #make a dataframe from the phyloseq object
 dfC7d4 <- as(sample_data(C7d4), "data.frame")
-View(dfC7d4)
-
 ```
 
 
@@ -328,7 +326,7 @@ ggplot(data = dfC7d4, aes(x=SampleDay, y=SR)) +
   theme(axis.text.x = element_text(angle = 30, hjust = 1))
 
 C7d4sr <- ggplot(dfC7d4, aes(x = SampleDay, y= SR, fill = SampleDay)) + 
-  geom_boxplot() + 
+  geom_boxplot(outlier.shape = NA) + 
   theme_bw() + 
   theme_classic() + 
   scale_fill_manual(values=col6,name="SampleDay") + 
@@ -350,7 +348,7 @@ View(dfC7d4SR_mean)
 # Box plot of SR by Sample Day with lines connecting mean values
 C7d4sr <- dfC7d4 %>% 
   ggplot(mapping = aes(x = SampleDay, y = SR, fill = SampleDay)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   geom_point(data = dfC7d4SR_mean,
              mapping = aes(x = SampleDay, y = average),
              color = "black",
@@ -424,10 +422,10 @@ dfC7d4PD_mean <- dfC7d4 %>%
   ungroup()
 View(dfC7d4PD_mean)
 
-# Box plot of SR by Sample Day with lines connecting mean values
+# Box plot of PD by Sample Day 
 C7d4pd <- dfC7d4 %>% 
   ggplot(mapping = aes(x = SampleDay, y = PD, fill = SampleDay)) +
-  geom_boxplot() +
+  geom_boxplot(outlier.shape = NA) +
   geom_point(data = dfC7d4PD_mean,
              mapping = aes(x = SampleDay, y = average),
              color = "black",
@@ -622,6 +620,9 @@ BBBBBBBB
 BBBBBBBB
 BBBBBBBB
 BBBBBBBB
+CCCCCCCC
+CCCCCCCC
+CCCCCCCC
 CCCCCCCC
 CCCCCCCC
 CCCCCCCC
