@@ -130,8 +130,10 @@ sd(dfC7d4$PD)
 # Bacteroidetes
 100*sum(taxa_sums(subset_taxa(C7d4, Phylum == "Bacteroidetes")))/sum(taxa_sums(C7d4))
 # Mean abundance = 30.00 %
+
 ntaxa(subset_taxa(C7d4, Phylum == "Bacteroidetes"))
 # Number of ASVs = 83
+
 
 # Proteobacteria
 100*sum(taxa_sums(subset_taxa(C7d4, Phylum == "Proteobacteria")))/sum(taxa_sums(C7d4))
@@ -191,6 +193,7 @@ dfC7d4_fresh <- as(sample_data(C7d4_fresh), "data.frame")
 # FRESH Phyla---- 
 get_taxa_unique(C7d4_fresh, taxonomic.rank = "Phylum") 
 
+
 # Descriptive stats for SR and PD
 mean(dfC7d4_fresh$SR) # 162.43
 sd(dfC7d4_fresh$SR) # 46.71
@@ -198,37 +201,46 @@ sd(dfC7d4_fresh$SR) # 46.71
 mean(dfC7d4_fresh$PD) # 7.10
 sd(dfC7d4_fresh$PD) # 2.08
 
-# Get mean relative abundance and number of taxa for each Phyla OVERALL (this is NOT by sample day)
+# View otu table as relative abundance by phylum
+#### Transform data to relative abundance
+ps_fresh_relabun <- transform_sample_counts(C7d4_fresh, function(x) (x/sum(x))*100)
 
-# Bacteroidetes
-100*sum(taxa_sums(subset_taxa(C7d4_fresh, Phylum == "Bacteroidetes")))/sum(taxa_sums(C7d4_fresh))
-# Mean abundance = 28.1 %
-ntaxa(subset_taxa(C7d4_fresh, Phylum == "Bacteroidetes"))
-# Number of ASVs = 34
+# Agglomerate taxa at the phylum level
+ps_fresh_ra_phylum <- tax_glom(ps_fresh_relabun, taxrank = "Phylum")
+# View rel abundances for all samples indiviudally
+otu_table(ps_fresh_ra_phylum)
 
-# Proteobacteria
-100*sum(taxa_sums(subset_taxa(C7d4_fresh, Phylum == "Proteobacteria")))/sum(taxa_sums(C7d4_fresh))
-# Mean abundance = 2.91%
-ntaxa(subset_taxa(C7d4_fresh, Phylum == "Proteobacteria"))
-# Number of ASVs = 13
+# Pooled abundances for all fresh samples ------
 
 # Firmicutes
 100*sum(taxa_sums(subset_taxa(C7d4_fresh, Phylum == "Firmicutes")))/sum(taxa_sums(C7d4_fresh))
-# Mean abundance = 41.2%
+# pooled abundance = 41.2%
 ntaxa(subset_taxa(C7d4_fresh, Phylum == "Firmicutes"))
 # Number of ASVs = 114
 
+# Bacteroidetes
+100*sum(taxa_sums(subset_taxa(C7d4_fresh, Phylum == "Bacteroidetes")))/sum(taxa_sums(C7d4_fresh))
+# pooled Abundance = 28.1 %
+ntaxa(subset_taxa(C7d4_fresh, Phylum == "Bacteroidetes"))
+# Number of ASVs = 34
+
 # Fusobacteria
 100*sum(taxa_sums(subset_taxa(C7d4_fresh, Phylum == "Fusobacteria")))/sum(taxa_sums(C7d4_fresh))
-# Mean abundance = 16.39%
+# pooled abundance = 16.39%
 ntaxa(subset_taxa(C7d4_fresh, Phylum == "Fusobacteria"))
 # Number of ASVs = 14
 
 # Actinobacteria
 100*sum(taxa_sums(subset_taxa(C7d4_fresh, Phylum == "Actinobacteria")))/sum(taxa_sums(C7d4_fresh))
-# Mean abundance = 11.41%
+# pooled abundance = 11.41%
 ntaxa(subset_taxa(C7d4_fresh, Phylum == "Actinobacteria"))
 # Number of ASVs = 18
+
+# Proteobacteria
+100*sum(taxa_sums(subset_taxa(C7d4_fresh, Phylum == "Proteobacteria")))/sum(taxa_sums(C7d4_fresh))
+# pooled abundance = 2.91%
+ntaxa(subset_taxa(C7d4_fresh, Phylum == "Proteobacteria"))
+# Number of ASVs = 13
 
 ```
 
