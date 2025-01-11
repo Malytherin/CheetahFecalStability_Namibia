@@ -130,6 +130,7 @@ sd(dfC7d4$PD)
 # Bacteroidetes
 100*sum(taxa_sums(subset_taxa(C7d4, Phylum == "Bacteroidetes")))/sum(taxa_sums(C7d4))
 # Mean abundance = 30.00 %
+sd()
 
 ntaxa(subset_taxa(C7d4, Phylum == "Bacteroidetes"))
 # Number of ASVs = 83
@@ -241,6 +242,52 @@ ntaxa(subset_taxa(C7d4_fresh, Phylum == "Actinobacteria"))
 # pooled abundance = 2.91%
 ntaxa(subset_taxa(C7d4_fresh, Phylum == "Proteobacteria"))
 # Number of ASVs = 13
+
+# Get mean relative abundance and number of taxa for each Phyla OVERALL (this is NOT by sample day)
+
+#### Transform data to relative abundance
+ps_fresh_relabun <- transform_sample_counts(C7d4_fresh, function(x) x/sum(x))
+
+# Agglomerate taxa at the phylum level
+ps_fresh_ra_phylum <- tax_glom(ps_fresh_relabun, taxrank = "Phylum")
+
+### Extract the abundance table
+abund_table_fresh2 <- as.data.frame(otu_table(ps_fresh_ra_phylum))
+
+
+# calculate mean and SD
+mean_per_row <- as.data.frame(apply(abund_table_fresh2, 1, function(row) mean(as.numeric(row), na.rm = TRUE)))
+sd_per_row <- as.data.frame(apply(abund_table_fresh2, 1, function(row) sd(as.numeric(row), na.rm = TRUE)))
+Phy_names <- tax_table_ra_phy$Phylum
+
+# Create dataframe of Rel Abun Phylum stats
+Fresh_RelAbun_Stats <- merge(mean_per_row, sd_per_row)
+mean_fresh <- (mean_per_row$`apply(abund_table_fresh2, 1, function(row) mean(as.numeric(row), na.rm = TRUE))`)*100
+sd_fresh <- (sd_per_row$`apply(abund_table_fresh2, 1, function(row) sd(as.numeric(row), na.rm = TRUE))`)*100
+
+fresh_phy_stats <- data.frame(
+  mean_abundance = mean_fresh,
+  sd_adundance = sd_fresh
+)
+
+rownames(fresh_phy_stats) <- Phy_names
+
+print(fresh_phy_stats)
+
+# Count number of ASVs in each phylum
+tax_table_fresh <- as.data.frame(tax_table(C7d4_fresh))
+
+asv_counts_by_phylum <- tax_table_fresh %>%
+  group_by(Phylum) %>%
+  summarise(num_ASVs = n())
+
+ASV_phylum <- data.frame(asv_counts_by_phylum)
+rownames(ASV_phylum) <- ASV_phylum$Phylum
+
+# Create full summary stats table
+Fresh_Phy_AllStats <- merge(fresh_phy_stats, ASV_phylum, by="row.names")
+print(Fresh_Phy_AllStats)
+
 
 ```
 
